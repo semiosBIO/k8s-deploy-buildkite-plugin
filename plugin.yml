@@ -15,6 +15,9 @@ configuration:
       default: default
     deploymentName:
       type: string
+    timeout:
+      type: string
+      default: 60s
     containers:
       type: array
       items: 
