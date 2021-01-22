@@ -32,7 +32,19 @@ function updateImage () {
 
     kubectl set image deployment/$deploymentName $containerstring --record -n $namespace
     kubectl annotate deployment/$deploymentName kubernetes.io/change-cause="${annotation}" -n $namespace
-    kubectl rollout status deployment/$deploymentName -n $namespace --timeout=$timeout
+
+    if kubectl rollout status deployment/$deploymentName -n $namespace --timeout=$timeout ; then
+        echo "--- :bk-status-passed: Deploy success"
+    else
+        if [[ "$BUILDKITE_PLUGIN_K8S_DEPLOY_ROLLBACKONFAIL" == "true" ]]; then
+            echo "--- :bk-status-failed: Deploy failed. Rolling back to previous revision"
+            kubectl rollout undo deployment/$deploymentName -n $namespace
+        else
+            echo "--- :bk-status-failed: Deploy failed"
+        fi
+        exit 1
+    fi
+    
 }
 
 if [[ "$BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION" == "updateImage" ]] ; then
