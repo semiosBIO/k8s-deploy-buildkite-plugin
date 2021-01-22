@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -euo pipefail
+set -eu
 
 function updateImage () {
     local i=0
@@ -29,7 +29,6 @@ function updateImage () {
         annotation="${annotation} commit='${gitcommitstring}'"
     fi
     
-
     echo "--- :kubernetes: Deploying new image to ${deploymentName}"
 
     kubectl set image deployment/$deploymentName $containerstring --record -n $namespace
