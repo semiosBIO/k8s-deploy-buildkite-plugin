@@ -2,18 +2,21 @@
 
 set -euo pipefail
 
-function updateImage () {
-    containerName="$BUILDKITE_PLUGIN_K8S_DEPLOY_PLUGIN_IMAGE"
-    namespace="$BUILDKITE_PLUGIN_K8S_DEPLOY_PLUGIN_NAMESPACE"
-    deploymentName="$BUILDKITE_PLUGIN_K8S_DEPLOY_PLUGIN_DEPLOYMENTNAME"
-    containerName="$BUILDKITE_PLUGIN_K8S_DEPLOY_PLUGIN_DEPLOYMENTNAME"
+env
 
-    echo "--- :kubernetes: Deploying new image to ${deploymentName}"
+#function updateImage () {
+#    containerName="$BUILDKITE_PLUGIN_K8S_DEPLOY_PLUGIN_IMAGE"
+#    namespace="$BUILDKITE_PLUGIN_K8S_DEPLOY_PLUGIN_NAMESPACE"
+#    deploymentName="$BUILDKITE_PLUGIN_K8S_DEPLOY_PLUGIN_DEPLOYMENTNAME"
+#    containerName="$BUILDKITE_PLUGIN_K8S_DEPLOY_PLUGIN_DEPLOYMENTNAME"
 
-    kubectl set image deployment/$deploymentName $containerName=$containerName --record -n $namespace
-    kubectl annotate deployment/$deploymentName kubernetes.io/change-cause=\"Buildkite deploy. Unblocked by $${BUILDKITE_UNBLOCKER}, $(git log --oneline -n 1)\" -n default
-}
+#    echo "--- :kubernetes: Deploying new image to ${deploymentName}"
 
-if [[ "$BUILDKITE_PLUGIN_K8S_DEPLOY_PLUGIN_ACTION" == "updateImage" ]] ; then
-    env
-fi
+#    kubectl set image deployment/$deploymentName $containerName=$containerName --record -n $namespace
+#    kubectl annotate deployment/$deploymentName kubernetes.io/change-cause=\"Buildkite deploy. Unblocked by $${BUILDKITE_UNBLOCKER}, $(git log --oneline -n 1)\" -n default
+#    kubectl rollout status deployment/staticmaps-deployment -n default
+#}
+
+#if [[ "$BUILDKITE_PLUGIN_K8S_DEPLOY_PLUGIN_ACTION" == "updateImage" ]] ; then
+    
+#fi
