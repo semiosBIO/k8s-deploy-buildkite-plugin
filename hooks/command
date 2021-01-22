@@ -18,12 +18,23 @@ function updateImage () {
 
     local namespace="$BUILDKITE_PLUGIN_K8S_DEPLOY_NAMESPACE"
     local deploymentName="$BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTNAME"
+    local annotation="Buildkite deploy $(date +'%d-%m-%Y %H:%M')."
+
+    if [[ ! -z "${BUILDKITE_UNBLOCKER}" ]]; then
+        annotation="${annotation} unblocker='${BUILDKITE_UNBLOCKER}'"
+    fi
+
+    local gitcommitstring=$(git log --oneline -n 1) || ""
+    if [[ ! -z "${gitcommitstring}" ]]; then
+        annotation="${annotation} commit='${gitcommitstring}'"
+    fi
+    
 
     echo "--- :kubernetes: Deploying new image to ${deploymentName}"
 
     kubectl set image deployment/$deploymentName $containerstring --record -n $namespace
-    kubectl annotate deployment/$deploymentName kubernetes.io/change-cause=\"Buildkite deploy. Unblocked by $${BUILDKITE_UNBLOCKER}, $(git log --oneline -n 1)\" -n default
-    kubectl rollout status deployment/staticmaps-deployment -n default
+    kubectl annotate deployment/$deploymentName kubernetes.io/change-cause="${annotation}" -n $namespace
+    kubectl rollout status deployment/$deploymentName -n $namespace
 }
 
 if [[ "$BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION" == "updateImage" ]] ; then
