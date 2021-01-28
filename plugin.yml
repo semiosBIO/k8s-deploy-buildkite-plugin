@@ -20,7 +20,7 @@ configuration:
       default: 60s
     containers:
       type: array
-      items: 
+      items:
         type: object
         properties:
           image:
@@ -30,7 +30,8 @@ configuration:
         required:
           - image
           - containerName
-    
+    patchJSON:
+      type: string
   anyOf:
     - properties:
         action:
@@ -39,5 +40,5 @@ configuration:
         - namespace
         - deploymentName
         - containers
-      
+
   additionalProperties: false
