@@ -33,7 +33,7 @@ function updateImage () {
 
     echo "--- :kubernetes: Deploying new image to ${deploymentName}"
 
-    if [[ ! -z "${patchJSON}"]]; then
+    if [[ ! -z "${patchJSON}" ]]; then
         kubectl patch deployment/$deploymentName --type='json' -p=$(printf "'%s'" "${patchJSON}")
     fi
 
