@@ -20,7 +20,6 @@ function updateImage () {
     local deploymentName="$BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTNAME"
     local timeout="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-60s}"
     local annotation="Buildkite deploy $(date +'%d-%m-%Y %H:%M')."
-    local patchJSON="${BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHJSON}"
 
     if [[ ! -z "${BUILDKITE_UNBLOCKER}" ]]; then
         annotation="${annotation} unblocker='${BUILDKITE_UNBLOCKER}'"
@@ -33,8 +32,9 @@ function updateImage () {
 
     echo "--- :kubernetes: Deploying new image to ${deploymentName}"
 
-    if [[ ! -z "${patchJSON}" ]]; then
-        kubectl patch deployment/$deploymentName --type='json' -p=$(printf "'%s'" "${patchJSON}")
+    if [[ ! -z "${BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHJSON}" ]]; then
+        echo "${BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHJSON}" > "/tmp/${BUILDKITE_COMMIT}.json"
+        kubectl patch deployment/${deploymentName} --namespace="${namespace}" --type="json" -p="$(cat /tmp/${BUILDKITE_COMMIT}.json)"
     fi
 
     kubectl set image deployment/$deploymentName $containerstring --record -n $namespace
