@@ -8,16 +8,14 @@ configuration:
       type: string
       enum:
         - updateImage
-        - runJob
+        - promoteImage
 
+# updateImage options
     namespace:
       type: string
       default: default
     deploymentName:
       type: string
-    timeout:
-      type: string
-      default: 60s
     containers:
       type: array
       items:
@@ -32,6 +30,30 @@ configuration:
           - containerName
     patchJSON:
       type: string
+
+# promoteImage options
+    sourceImage:
+      description: "URL of the source repository i.e. www.mysourcerepo.com/myimage:latest"
+      type: object
+      properties:
+        image: string
+        repositoryUrl: string
+        region: string
+    destinationImages:
+      description: "URLs of the destination repositories i.e. www.mydestinationrepo.com/myimage:latest"
+      type: array
+      items:
+        type: object
+        properties:
+          image: string
+          repositoryUrl: string
+          region: string
+
+# common settings
+    timeout:
+      type: integer
+      default: 300
+
   anyOf:
     - properties:
         action:
@@ -40,5 +62,11 @@ configuration:
         - namespace
         - deploymentName
         - containers
+    - properties:
+        action:
+          const: promoteImage
+      required:
+        - sourceImage
+        - destinationImages
 
   additionalProperties: false
