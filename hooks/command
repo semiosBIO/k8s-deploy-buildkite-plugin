@@ -15,7 +15,7 @@ function updateImage () {
     done
 
     local namespace="$BUILDKITE_PLUGIN_K8S_DEPLOY_NAMESPACE"
-    local deployment_name="$BUILDKITE_PLUGIN_K8S_DEPLOY_deployment_name"
+    local deployment_name="$BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTNAME"
     local timeout="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-300}s"
     local annotation="Buildkite deploy $(date +'%d-%m-%Y %H:%M')."
 
