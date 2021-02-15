@@ -113,8 +113,6 @@ function promoteImage () {
         destination_image_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_IMAGE"
         destination_repository_url_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_REPOSITORYURL"
 
-        docker rmi ${!destination_repository_url_envvar}/${!destination_image_envvar}
-
         if [ push_exit_code -ne 0 ]; then
             echo "--- :bk-status-failed: Promotion failed. Push failed to destination repository ${!destination_repository_url_envvar}"
             failure_count=$((failure_count+1))
