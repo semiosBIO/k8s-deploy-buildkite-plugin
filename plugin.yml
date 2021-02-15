@@ -10,7 +10,7 @@ configuration:
         - updateImage
         - promoteImage
 
-# updateImage options
+    # updateImage options
     namespace:
       type: string
       default: default
@@ -31,7 +31,7 @@ configuration:
     patchJSON:
       type: string
 
-# promoteImage options
+    # promoteImage options
     sourceImage:
       description: "URL of the source repository i.e. www.mysourcerepo.com/myimage:latest"
       type: object
@@ -49,7 +49,7 @@ configuration:
           repositoryUrl: string
           region: string
 
-# common settings
+    # common settings
     timeout:
       type: integer
       default: 300
