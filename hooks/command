@@ -2,20 +2,20 @@
 
 function updateImage () {
     local i=0
-    local imagevarname="BUILDKITE_PLUGIN_K8S_DEPLOY_CONTAINERS_${i}_IMAGE"
-    local containervarname="BUILDKITE_PLUGIN_K8S_DEPLOY_CONTAINERS_${i}_CONTAINERNAME"
-    local containerstring=""
+    local image_envvar_name="BUILDKITE_PLUGIN_K8S_DEPLOY_CONTAINERS_${i}_IMAGE"
+    local container_envvar_name="BUILDKITE_PLUGIN_K8S_DEPLOY_CONTAINERS_${i}_CONTAINERNAME"
+    local container_string=""
 
     # Extract each container to be updated
-    while [[ -n "${!imagevarname:-}" ]] ; do
-        containerstring=("${containerstring} ${!containervarname}=${!imagevarname}")
+    while [[ -n "${!image_envvar_name:-}" ]] ; do
+        container_string=("${container_string} ${!container_envvar_name}=${!image_envvar_name}")
         i=$((i+1))
-        imagevarname="BUILDKITE_PLUGIN_K8S_DEPLOY_CONTAINERS_${i}_IMAGE"
-        containervarname="BUILDKITE_PLUGIN_K8S_DEPLOY_CONTAINERS_${i}_CONTAINERNAME"
+        image_envvar_name="BUILDKITE_PLUGIN_K8S_DEPLOY_CONTAINERS_${i}_IMAGE"
+        container_envvar_name="BUILDKITE_PLUGIN_K8S_DEPLOY_CONTAINERS_${i}_CONTAINERNAME"
     done
 
     local namespace="$BUILDKITE_PLUGIN_K8S_DEPLOY_NAMESPACE"
-    local deploymentName="$BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTNAME"
+    local deployment_name="$BUILDKITE_PLUGIN_K8S_DEPLOY_deployment_name"
     local timeout="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-300}s"
     local annotation="Buildkite deploy $(date +'%d-%m-%Y %H:%M')."
 
@@ -23,28 +23,28 @@ function updateImage () {
         annotation="${annotation} unblocker='${BUILDKITE_UNBLOCKER}'"
     fi
 
-    local gitcommitstring=$(git log --oneline -n 1) || "$BUILDKITE_COMMIT $BUILDKITE_MESSAGE"
+    local git_commit_string=$(git log --oneline -n 1) || "$BUILDKITE_COMMIT $BUILDKITE_MESSAGE"
     if [[ ! -z "${BUILDKITE_MESSAGE}" ]]; then
-        annotation="${annotation} commit='${gitcommitstring}'"
+        annotation="${annotation} commit='${git_commit_string}'"
     fi
 
-    echo "--- :kubernetes: Deploying new image to ${deploymentName}"
+    echo "--- :kubernetes: Deploying new image to ${deployment_name}"
 
     if [[ ! -z "${BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHJSON}" ]]; then
         echo "${BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHJSON}" > "/tmp/${BUILDKITE_COMMIT}.json"
-        kubectl patch deployment/${deploymentName} --namespace="${namespace}" --type="json" -p="$(cat /tmp/${BUILDKITE_COMMIT}.json)"
+        kubectl patch deployment/${deployment_name} --namespace="${namespace}" --type="json" -p="$(cat /tmp/${BUILDKITE_COMMIT}.json)"
     fi
 
-    kubectl set image deployment/$deploymentName $containerstring --record -n $namespace
+    kubectl set image deployment/$deployment_name $container_string --record -n $namespace
 
-    kubectl annotate deployment/$deploymentName kubernetes.io/change-cause="${annotation}" -n $namespace
+    kubectl annotate deployment/$deployment_name kubernetes.io/change-cause="${annotation}" -n $namespace
 
-    if kubectl rollout status deployment/$deploymentName -n $namespace --timeout=$timeout ; then
+    if kubectl rollout status deployment/$deployment_name -n $namespace --timeout=$timeout ; then
         echo "--- :bk-status-passed: Deploy success"
     else
         if [[ "$BUILDKITE_PLUGIN_K8S_DEPLOY_ROLLBACKONFAIL" == "true" ]]; then
             echo "--- :bk-status-failed: Deploy failed. Rolling back to previous revision"
-            kubectl rollout undo deployment/$deploymentName -n $namespace
+            kubectl rollout undo deployment/$deployment_name -n $namespace
         else
             echo "--- :bk-status-failed: Deploy failed"
         fi
@@ -53,12 +53,15 @@ function updateImage () {
 }
 
 function promoteImage () {
+    # Login to source repository
+
     aws ecr get-login-password --region $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REGION | docker login --username AWS --password-stdin $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL
     if [ $? -ne 0 ]; then
         echo "--- :bk-status-failed: Promotion failed. Authentication failed with source repository"
         exit 1
     fi
 
+    # Pull the source image
 
     docker pull $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL/$BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_IMAGE
     if [ $? -ne 0 ]; then
@@ -66,54 +69,71 @@ function promoteImage () {
         exit 1
     fi
 
+    # Loop over destinations and push in parallel
+
     local i=0
-    local destinationimage="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_IMAGE"
-    local destinationrepositoryurl="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REPOSITORYURL"
-    local destinationregion="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REGION"
+    local destination_image_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_IMAGE"
+    local destination_repository_url_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_REPOSITORYURL"
+    local destination_region_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_REGION"
 
     local push_pids=()
 
-    while [[ -n "${!destinationimage:-}" ]] ; do
+    while [[ -n "${!destination_image_envvar:-}" ]] ; do
         # Authenticate with the destination region
-        aws ecr get-login-password --region ${!destinationregion} | docker login --username AWS --password-stdin ${!destinationrepositoryurl}
+        aws ecr get-login-password --region ${!destination_region_envvar} | docker login --username AWS --password-stdin ${!destination_repository_url_envvar}
         if [ $? -ne 0 ]; then
-            echo "--- :bk-status-failed: Promotion failed. Authentication failed with destination repository ${!destinationrepositoryurl}"
+            echo "--- :bk-status-failed: Promotion failed. Authentication failed with destination repository ${!destination_repository_url_envvar}"
             exit 1
         fi
         
         # Tag and push the image
-        docker tag $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL/$BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_IMAGE ${!destinationrepositoryurl}/${!destinationimage}
+        docker tag $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL/$BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_IMAGE ${!destination_repository_url_envvar}/${!destination_image_envvar}
 
         # Start push in parallel
-        docker push ${!destinationrepositoryurl}/${!destinationimage} &
+        docker push ${!destination_repository_url_envvar}/${!destination_image_envvar} &
         push_pids+=($!)
 
         i=$((i+1))
-        destinationimage="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_IMAGE"
-        destinationrepositoryurl="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REPOSITORYURL"
-        destinationregion="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REGION"
+        destination_image_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_IMAGE"
+        destination_repository_url_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_REPOSITORYURL"
+        destination_region_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_REGION"
     done
 
+    # Wait for each image push to complete
+
+    local failure_count=0
+
     for i in ${!push_pids[@]}; do
-        # Wait for push to complete
         wait ${push_pids[$i]}
 
         local push_exit_code=$?
 
         # Cleanup the tag locally
-        destinationimage="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_IMAGE"
-        destinationrepositoryurl="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REPOSITORYURL"
 
-        docker rmi ${!destinationrepositoryurl}/${!destinationimage}
+        destination_image_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_IMAGE"
+        destination_repository_url_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_REPOSITORYURL"
+
+        docker rmi ${!destination_repository_url_envvar}/${!destination_image_envvar}
 
         if [ push_exit_code -ne 0 ]; then
-            echo "--- :bk-status-failed: Promotion failed. Push failed to destination repository ${!destinationrepositoryurl}"
-            exit 1
+            echo "--- :bk-status-failed: Promotion failed. Push failed to destination repository ${!destination_repository_url_envvar}"
+            failure_count=$((failure_count+1))
+        else
+            echo "--- :bk-status-passed: Image promotion success - ${!destination_repository_url_envvar}/${!destination_image_envvar}"
         fi
     done
 
     # Clean up the pulled image
+
     docker image rm $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL/$BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_IMAGE
+
+    # Fail this build step if there was any failures pushing an image
+
+    if [ failure_count -ne 0 ]; then
+        exit 1
+    else
+        exit 0
+    fi
 }
 
 case "$BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION" in
