@@ -129,10 +129,10 @@ function promoteImage () {
 
     # Fail this build step if there was any failures pushing an image
 
-    if [ failure_count -ne 0 ]; then
-        exit 1
-    else
+    if [ "$failure_count" -eq "0" ]; then
         exit 0
+    else
+        exit 1
     fi
 }
 
