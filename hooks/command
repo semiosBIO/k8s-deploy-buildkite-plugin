@@ -72,9 +72,9 @@ function promoteImage () {
     # Loop over destinations and push in parallel
 
     local i=0
-    local destination_image_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_IMAGE"
-    local destination_repository_url_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_REPOSITORYURL"
-    local destination_region_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_REGION"
+    local destination_image_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_IMAGE"
+    local destination_repository_url_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REPOSITORYURL"
+    local destination_region_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REGION"
 
     local push_pids=()
 
@@ -94,9 +94,9 @@ function promoteImage () {
         push_pids+=($!)
 
         i=$((i+1))
-        destination_image_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_IMAGE"
-        destination_repository_url_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_REPOSITORYURL"
-        destination_region_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_REGION"
+        destination_image_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_IMAGE"
+        destination_repository_url_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REPOSITORYURL"
+        destination_region_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REGION"
     done
 
     # Wait for each image push to complete
@@ -110,8 +110,8 @@ function promoteImage () {
 
         # Cleanup the tag locally
 
-        destination_image_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_IMAGE"
-        destination_repository_url_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_destination_image_envvarS_${i}_REPOSITORYURL"
+        destination_image_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_IMAGE"
+        destination_repository_url_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REPOSITORYURL"
 
         if [ push_exit_code -ne 0 ]; then
             echo "--- :bk-status-failed: Promotion failed. Push failed to destination repository ${!destination_repository_url_envvar}"
@@ -120,10 +120,6 @@ function promoteImage () {
             echo "--- :bk-status-passed: Image promotion success - ${!destination_repository_url_envvar}/${!destination_image_envvar}"
         fi
     done
-
-    # Clean up the pulled image
-
-    docker image rm $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL/$BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_IMAGE
 
     # Fail this build step if there was any failures pushing an image
 
