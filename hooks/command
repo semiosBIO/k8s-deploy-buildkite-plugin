@@ -1,7 +1,5 @@
 #!/bin/bash
 
-env
-
 function updateImage () {
     local i=0
     local imagevarname="BUILDKITE_PLUGIN_K8S_DEPLOY_CONTAINERS_${i}_IMAGE"
@@ -73,6 +71,8 @@ function promoteImage () {
     local destinationrepositoryurl="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REPOSITORYURL"
     local destinationregion="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REGION"
 
+    local push_pids=()
+
     while [[ -n "${!destinationimage:-}" ]] ; do
         # Authenticate with the destination region
         aws ecr get-login-password --region ${!destinationregion} | docker login --username AWS --password-stdin ${!destinationrepositoryurl}
@@ -83,71 +83,38 @@ function promoteImage () {
         
         # Tag and push the image
         docker tag $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL/$BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_IMAGE ${!destinationrepositoryurl}/${!destinationimage}
-        docker push ${!destinationrepositoryurl}/${!destinationimage}
-        if [ $? -ne 0 ]; then
-            echo "--- :bk-status-failed: Promotion failed. Push failed to destination repository ${!destinationrepositoryurl}"
-            exit 1
-        fi
 
-        # Cleanup the tag locally
-        docker rmi ${!destinationrepositoryurl}/${!destinationimage}
+        # Start push in parallel
+        docker push ${!destinationrepositoryurl}/${!destinationimage} &
+        push_pids+=($!)
 
         i=$((i+1))
         destinationimage="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_IMAGE"
         destinationrepositoryurl="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REPOSITORYURL"
-        destinationregion="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_region"
+        destinationregion="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REGION"
+    done
+
+    for i in ${!push_pids[@]}; do
+        # Wait for push to complete
+        wait ${push_pids[$i]}
+
+        local push_exit_code=$?
+
+        # Cleanup the tag locally
+        destinationimage="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_IMAGE"
+        destinationrepositoryurl="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REPOSITORYURL"
+
+        docker rmi ${!destinationrepositoryurl}/${!destinationimage}
+
+        if [ push_exit_code -ne 0 ]; then
+            echo "--- :bk-status-failed: Promotion failed. Push failed to destination repository ${!destinationrepositoryurl}"
+            exit 1
+        fi
     done
 
     # Clean up the pulled image
     docker image rm $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL/$BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_IMAGE
 }
-
-function run_job () {
-    local templates_directory="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && cd .. && pwd )/templates/"
-    local safe_pipeline_name="$( echo "$BUILDKITE_PIPELINE_NAME" | tr '[:upper:]' '[:lower:]' | tr '_' '-' | tr ' ' '-')"
-    local random_id="$( head -c 5 /dev/urandom | base32 | tr '[:upper:]' '[:lower:]' )"
-
-    JOB_NAME="promoteImage-$safe_pipeline_name-$random_id"
-    JOB_TIMEOUT="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-300}"
-
-    # Create job command to promote images
-    JOB_AWS_INIT_SCRIPT="aws ecr get-login-password --region $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REGION > /tmp/creds/source ;"
-
-    JOB_SCRIPT="cat /tmp/creds/source | docker login --username AWS --password-stdin $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL ;"
-    JOB_SCRIPT="$JOB_SCRIPT docker pull $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL/$BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_IMAGE ;"
-
-    local i=0
-    local destinationimage="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_IMAGE"
-    local destinationrepositoryurl="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REPOSITORYURL"
-    local destinationregion="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REGION"
-
-    while [[ -n "${!destinationimage:-}" ]] ; do
-        JOB_AWS_INIT_SCRIPT="$JOB_AWS_INIT_SCRIPT aws ecr get-login-password --region ${!destinationregion} > /tmp/creds/destination_${i} ;"
-
-        JOB_SCRIPT="$JOB_SCRIPT cat /tmp/creds/destination_${i} | docker login --username AWS --password-stdin ${!destinationrepositoryurl} ;"
-        JOB_SCRIPT="$JOB_SCRIPT docker tag $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL/$BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_IMAGE ${!destinationrepositoryurl}/${!destinationimage} ;"
-        JOB_SCRIPT="$JOB_SCRIPT docker push ${!destinationrepositoryurl}/${!destinationimage} ;"
-
-        i=$((i+1))
-        destinationimage="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_IMAGE"
-        destinationrepositoryurl="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_REPOSITORYURL"
-        destinationregion="BUILDKITE_PLUGIN_K8S_DEPLOY_DESTINATIONIMAGES_${i}_region"
-    done
-
-    echo "$JOB_NAME"
-    echo "$JOB_AWS_INIT_SCRIPT"
-    echo "$JOB_SCRIPT"
-}
-
-
-function tail_job {
-  while true ; do
-    stdbuf -o0 -e0 kubectl logs -f "job/${job_name}" 2>>/dev/null || true
-    sleep 0.2
-  done
-}
-
-
 
 case "$BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION" in
     'updateImage')
