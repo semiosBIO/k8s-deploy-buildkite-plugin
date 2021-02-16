@@ -147,10 +147,16 @@ function promoteImage () {
     fi
 }
 
+BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION="runJob"
+BUILDKITE_PIPELINE_NAME="org-web"
+BUILDKITE_PLUGIN_K8S_DEPLOY_JOBIMAGE="552375026182.dkr.ecr.ap-southeast-2.amazonaws.com/global-org-web:latest"
+BUILDKITE_PLUGIN_K8S_DEPLOY_JOBTEMPLATEURL="s3://staging-agw-container-ap-southeast-2-sources/sandbox-org-web/jobs/db-migrate-job.json"
+
 function run_job () {
     local templates_directory="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && cd .. && pwd )/templates"
     local safe_pipeline_name="$( echo "$BUILDKITE_PIPELINE_NAME" | tr '[:upper:]' '[:lower:]' | tr '_' '-' | tr ' ' '-')"
     local random_id="$( head -c 5 /dev/urandom | base32 | tr '[:upper:]' '[:lower:]' )"
+    local service_account_name="$BUILDKITE_PLUGIN_K8S_DEPLOY_JOBSERVICEACCOUNTNAME"
 
     JOB_NAME="buildkite-job-$safe_pipeline_name-$random_id"
     JOB_IMAGE="$BUILDKITE_PLUGIN_K8S_DEPLOY_JOBIMAGE"
@@ -158,7 +164,12 @@ function run_job () {
 
     local job_json_file="/tmp/$JOB_NAME.json"
 
-    aws s3 cp $BUILDKITE_PLUGIN_K8S_DEPLOY_JOBTEMPLATEURL $job_json_file
+    echo "--- :s3: Fetching job template from S3"
+    
+    if ! aws s3 cp $BUILDKITE_PLUGIN_K8S_DEPLOY_JOBTEMPLATEURL $job_json_file ; then
+        echo "--- :bk-status-failed: Failed to download job template from S3"
+        exit 1
+    fi
 
     export JOB_NAME JOB_IMAGE
     cat <<< $(envsubst < $job_json_file) > $job_json_file
@@ -200,35 +211,37 @@ function run_job () {
 
 
 function tail_job_logs {
-    # Get init container names from the job file
+    # Get init container names from the job file if there are any
 
-    local init_container_names=()
-    for row in $(cat $1 | jq -r '.spec.template.spec.initContainers[] | @base64'); do
-        _jq() {
-            echo ${row} | base64 --decode | jq -r ${1}
-        }
-        init_container_names+=($(_jq '.name'))
-    done
-
-    # Tail the logs of the init containers in order
-
-    for container_name in "${init_container_names[@]}"; do
-        echo "--- :k8s: Container ${container_name}"
-
-        while true ; do
-            stdbuf -o0 -e0 kubectl logs -f "job/${JOB_NAME}" -c ${container_name} 2>>/dev/null
-
-            if [ $? -eq 0 ]; then
-                break
-            else
-                jobstatus=$(kubectl get job "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
-                if [[ "$jobstatus" == "Failed" ]]; then
-                    echo "Job failed on init container ${container_name}"
-                    return
-                fi
-            fi
+    if [[ "$(cat $1 | jq ".spec.template.spec.initContainers")" -ne "null" ]]; then
+        local init_container_names=()
+        for row in $(cat $1 | jq -r '.spec.template.spec.initContainers[] | @base64'); do
+            _jq() {
+                echo ${row} | base64 --decode | jq -r ${1}
+            }
+            init_container_names+=($(_jq '.name'))
         done
-    done
+
+        # Tail the logs of the init containers in order
+
+        for container_name in "${init_container_names[@]}"; do
+            echo "--- :k8s: Container ${container_name}"
+
+            while true ; do
+                stdbuf -o0 -e0 kubectl logs -f "job/${JOB_NAME}" -c ${container_name} 2>>/dev/null
+
+                if [ $? -eq 0 ]; then
+                    break
+                else
+                    jobstatus=$(kubectl get job "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
+                    if [[ "$jobstatus" == "Failed" ]]; then
+                        echo "Job failed on init container ${container_name}"
+                        return
+                    fi
+                fi
+            done
+        done
+    fi
 
     # Tail the main container logs
 
