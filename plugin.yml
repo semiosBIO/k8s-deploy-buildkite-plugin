@@ -77,5 +77,11 @@ configuration:
       required:
         - sourceImage
         - destinationImages
+    - properties:
+        action:
+          const: runJob
+      required:
+        - jobTemplateUrl
+        - jobImage
 
   additionalProperties: false
