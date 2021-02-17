@@ -147,11 +147,6 @@ function promoteImage () {
     fi
 }
 
-BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION="runJob"
-BUILDKITE_PIPELINE_NAME="org-web"
-BUILDKITE_PLUGIN_K8S_DEPLOY_JOBIMAGE="552375026182.dkr.ecr.ap-southeast-2.amazonaws.com/global-org-web:latest"
-BUILDKITE_PLUGIN_K8S_DEPLOY_JOBTEMPLATEURL="s3://staging-agw-container-ap-southeast-2-sources/sandbox-org-web/jobs/assets-upload-job.json"
-
 function run_job () {
     local templates_directory="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && cd .. && pwd )/templates"
     local safe_pipeline_name="$( echo "$BUILDKITE_PIPELINE_NAME" | tr '[:upper:]' '[:lower:]' | tr '_' '-' | tr ' ' '-')"
@@ -204,7 +199,7 @@ function run_job () {
 
     # Clean up
 
-    kubectl delete job/$JOB_NAME
+    kubectl delete -n $namespace job/$JOB_NAME
     rm $job_json_file
 
     exit $exit_code
@@ -231,7 +226,7 @@ function tail_job_logs {
             echo "--- :k8s: Container ${container_name}"
 
             while true ; do
-                stdbuf -o0 -e0 kubectl logs -f "job/${JOB_NAME}" -c ${container_name} 2>>/dev/null
+                stdbuf -o0 -e0 kubectl logs -n $namespace -f "job/${JOB_NAME}" -c ${container_name} 2>>/dev/null
 
                 if [ $? -eq 0 ]; then
                     break
@@ -253,7 +248,7 @@ function tail_job_logs {
     echo "--- :k8s: Container ${main_container_name}"
 
     while true ; do
-        stdbuf -o0 -e0 kubectl logs -f "job/${JOB_NAME}" 2>>/dev/null
+        stdbuf -o0 -e0 kubectl logs -n $namespace -f "job/${JOB_NAME}" 2>>/dev/null
 
         if [ $? -eq 0 ]; then
             break
