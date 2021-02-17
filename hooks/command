@@ -1,7 +1,5 @@
 #!/bin/bash
 
-env
-
 function updateImage () {
     local i=0
     local image_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_CONTAINERS_${i}_IMAGE"
@@ -149,12 +147,17 @@ function promoteImage () {
     fi
 }
 
+BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION="runJob"
+BUILDKITE_PIPELINE_NAME="org-web"
+BUILDKITE_PLUGIN_K8S_DEPLOY_JOBIMAGE="552375026182.dkr.ecr.ap-southeast-2.amazonaws.com/global-org-web:latest"
+BUILDKITE_PLUGIN_K8S_DEPLOY_JOBTEMPLATEURL="s3://staging-agw-container-ap-southeast-2-sources/sandbox-org-web/jobs/assets-upload-job.json"
+
 function run_job () {
     local templates_directory="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && cd .. && pwd )/templates"
     local safe_pipeline_name="$( echo "$BUILDKITE_PIPELINE_NAME" | tr '[:upper:]' '[:lower:]' | tr '_' '-' | tr ' ' '-')"
     local random_id="$( head -c 5 /dev/urandom | base32 | tr '[:upper:]' '[:lower:]' )"
     local service_account_name="$BUILDKITE_PLUGIN_K8S_DEPLOY_JOBSERVICEACCOUNTNAME"
-    local namespace="${$BUILDKITE_PLUGIN_K8S_DEPLOY_JOBNAMESPACE:-deafult}"
+    local namespace="${BUILDKITE_PLUGIN_K8S_DEPLOY_JOBNAMESPACE:-default}"
 
     JOB_NAME="buildkite-job-$safe_pipeline_name-$random_id"
     JOB_IMAGE="$BUILDKITE_PLUGIN_K8S_DEPLOY_JOBIMAGE"
