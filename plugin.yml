@@ -56,7 +56,10 @@ configuration:
     jobImage:
       description: "URL of the job image i.e. www.mydestinationrepo.com/myimage:latest"
       type: string
- 
+    jobNamespace:
+      description: "Kubernetes namespace where the job is to be created"
+      type: string
+      default: default
 
     # common settings
     timeout:

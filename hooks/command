@@ -152,6 +152,7 @@ function run_job () {
     local safe_pipeline_name="$( echo "$BUILDKITE_PIPELINE_NAME" | tr '[:upper:]' '[:lower:]' | tr '_' '-' | tr ' ' '-')"
     local random_id="$( head -c 5 /dev/urandom | base32 | tr '[:upper:]' '[:lower:]' )"
     local service_account_name="$BUILDKITE_PLUGIN_K8S_DEPLOY_JOBSERVICEACCOUNTNAME"
+    local namespace=$BUILDKITE_PLUGIN_K8S_DEPLOY_JOBNAMESPACE
 
     JOB_NAME="buildkite-job-$safe_pipeline_name-$random_id"
     JOB_IMAGE="$BUILDKITE_PLUGIN_K8S_DEPLOY_JOBIMAGE"
@@ -171,17 +172,17 @@ function run_job () {
 
     # Run the job
 
-    if ! kubectl apply -f $job_json_file ; then
+    if ! kubectl apply -n $namespace -f $job_json_file ; then
       echo "--- :bk-status-failed: Job failed to launch"
       rm $job_json_file
       exit 1
     fi
 
-    tail_job_logs "$job_json_file"
+    tail_job_logs "$job_json_file" "$namespace"
 
     local jobstatus=""
     while [[ -z "$jobstatus" ]] ; do
-        jobstatus=$(kubectl get job "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
+        jobstatus=$(kubectl get job -n $namespace "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
         sleep 1
     done
 
@@ -206,6 +207,8 @@ function run_job () {
 
 
 function tail_job_logs {
+    local namespace=$2
+
     # Get init container names from the job file if there are any
 
     if [[ $( cat $1 | jq -r ".spec.template.spec.initContainers" ) != "null" ]]; then
@@ -228,7 +231,7 @@ function tail_job_logs {
                 if [ $? -eq 0 ]; then
                     break
                 else
-                    jobstatus=$(kubectl get job "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
+                    jobstatus=$(kubectl get job -n $namespace "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
                     if [[ "$jobstatus" == "Failed" ]]; then
                         echo "Job failed on init container ${container_name}"
                         return
@@ -250,7 +253,7 @@ function tail_job_logs {
         if [ $? -eq 0 ]; then
             break
         else
-            jobstatus=$(kubectl get job "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
+            jobstatus=$(kubectl get job -n $namespace "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
             if [[ "$jobstatus" == "Failed" ]]; then
                 echo "Job failed on container ${main_container_name}"
                 return
