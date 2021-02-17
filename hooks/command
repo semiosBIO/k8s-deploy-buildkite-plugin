@@ -147,6 +147,11 @@ function promoteImage () {
     fi
 }
 
+BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION="runJob"
+BUILDKITE_PIPELINE_NAME="org-web"
+BUILDKITE_PLUGIN_K8S_DEPLOY_JOBIMAGE="552375026182.dkr.ecr.ap-southeast-2.amazonaws.com/global-org-web:latest"
+BUILDKITE_PLUGIN_K8S_DEPLOY_JOBTEMPLATEURL="s3://staging-agw-container-ap-southeast-2-sources/sandbox-org-web/jobs/assets-upload-job.json"
+
 function run_job () {
     local templates_directory="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && cd .. && pwd )/templates"
     local safe_pipeline_name="$( echo "$BUILDKITE_PIPELINE_NAME" | tr '[:upper:]' '[:lower:]' | tr '_' '-' | tr ' ' '-')"
@@ -208,7 +213,7 @@ function run_job () {
 function tail_job_logs {
     # Get init container names from the job file if there are any
 
-    if [[ "$(cat $1 | jq ".spec.template.spec.initContainers")" -ne "null" ]]; then
+    if [[ $( cat $1 | jq -r ".spec.template.spec.initContainers" ) != "null" ]]; then
         local init_container_names=()
         for row in $(cat $1 | jq -r '.spec.template.spec.initContainers[] | @base64'); do
             _jq() {
