@@ -4,11 +4,15 @@ function updateImage () {
     # Start deploys in parallel
     local i=0
     local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAME"
+    local current_revisions=()
     local deploy_pids=()
     local exit_codes=()
     local should_rollback=0
 
     while [[ -n "${!deployment_name_envvar:-}" ]] ; do
+        local deployment_name="${!deployment_name_envvar}"
+        current_revisions+=(`kubectl get deployment/$deployment_name -o json | jq -r '.metadata.annotations."deployment.kubernetes.io/revision"'`)
+
         updateDeployment "$i" &
         deploy_pids+=($!)
 
@@ -33,7 +37,7 @@ function updateImage () {
 
         for i in ${!exit_codes[@]}; do
             if [ ${exit_codes[$i]} -eq "0" ]; then
-                rollbackDeployment "${i}" &
+                rollbackDeployment "${i}" "${current_revisions[$i]}" &
             fi
         done
 
@@ -65,12 +69,26 @@ function updateImage () {
         echo "--- :bk-status-failed: Rolling back deployment"
 
         for i in ${!exit_codes[@]}; do
-            rollbackDeployment "${i}" &
+            rollbackDeployment "${i}" "${current_revisions[$i]}" &
         done
 
         wait
         exit 1
     fi
+
+    # Print commands to rollback the deploys as an FYI
+    echo "--- :bk-status-failed: Rollback information"
+    echo "Use the below commands to rollback the deployments to thier previous revision."
+    for i in ${!current_revisions[@]}; do
+        local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAMESPACE"
+        local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAME"
+
+        local namespace="${!namespace_envvar:-default}"
+        local deployment_name="${!deployment_name_envvar}"
+        local original_revision=${current_revisions[$i]}
+
+        echo "kubectl rollout undo deployment/$deployment_name -n $namespace --to-revision=$original_revision"
+    done
 
     exit 0
 }
@@ -82,7 +100,7 @@ function waitForDeploymentRollout () {
 
     local namespace="${!namespace_envvar:-default}"
     local deployment_name="${!deployment_name_envvar}"
-    local timeout="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-30}s"
+    local timeout="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-300}s"
 
     if ! kubectl rollout status deployment/$deployment_name -n $namespace --timeout=$timeout ; then
         echo "--- :bk-status-failed: Deploy failed for '${deployment_name}'"
@@ -95,13 +113,19 @@ function waitForDeploymentRollout () {
 
 function rollbackDeployment () {
     local deployment_index=$1
+    local original_revision=$2
+
     local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_NAMESPACE"
     local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_NAME"
 
     local namespace="${!namespace_envvar:-default}"
     local deployment_name="${!deployment_name_envvar}"
 
-    kubectl rollout undo deployment/$deployment_name -n $namespace
+
+    echo "--- ↩️  Rolling back '${deployment_name}' to revision $original_revision"
+
+    kubectl rollout undo deployment/$deployment_name -n $namespace --to-revision=$original_revision
+
     if [ $? -ne 0 ]; then
         echo "--- :bk-status-failed: Failed to rollback '${deployment_name}'"
         exit 1
