@@ -1,7 +1,5 @@
 #!/bin/bash
 
-env
-
 function updateImage () {
     # Start deploys in parallel
     local i=0
@@ -21,21 +19,20 @@ function updateImage () {
     for i in ${!deploy_pids[@]}; do
         wait ${deploy_pids[$i]}
 
-        local deploy_exit_code=$?
-        exit_codes+=($deploy_exit_code)
+        exit_codes+=($?)
 
-        if [ deploy_exit_code -ne 0 ]; then
+        if [ $? -ne 0 ]; then
             should_rollback=1
         fi
     done
 
     # Rollback and exit
 
-    if [ should_rollback -ne 0 ]; then
+    if [ $should_rollback -ne 0 ]; then
         # Rollback any successful deployments, ignore unsuccesful ones since they should have never deployed
 
         for i in ${!exit_codes[@]}; do
-            if [ ${exit_codes[$i]} -eq 0 ]; then
+            if [ ${exit_codes[$i]} -eq "0" ]; then
                 rollbackDeployment "${i}" &
             fi
         done
@@ -53,27 +50,22 @@ function updateImage () {
         rollout_pids+=($!)
     done
 
-    exit_codes=()
     for i in ${!rollout_pids[@]}; do
         wait ${rollout_pids[$i]}
 
-        local rollout_exit_code=$?
-        exit_codes+=($rollout_exit_code)
-
-        if [ rollout_exit_code -ne 0 ]; then
+        if [ $? -ne 0 ]; then
             should_rollback=1
         fi
     done
 
     # Rollback and exit
 
-    if [ should_rollback -ne 0 ]; then
+    if [ $should_rollback -ne 0 ]; then
         # Rollback any successful deployments, ignore unsuccesful ones since they should have never deployed
+        echo "--- :bk-status-failed: Rolling back deployment"
 
         for i in ${!exit_codes[@]}; do
-            if [ ${exit_codes[$i]} -eq 0 ]; then
-                rollbackDeployment "${i}" &
-            fi
+            rollbackDeployment "${i}" &
         done
 
         wait
@@ -90,14 +82,14 @@ function waitForDeploymentRollout () {
 
     local namespace="${!namespace_envvar:-default}"
     local deployment_name="${!deployment_name_envvar}"
-    local timeout="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-300}s"
+    local timeout="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-30}s"
 
     if ! kubectl rollout status deployment/$deployment_name -n $namespace --timeout=$timeout ; then
-        echo "--- :bk-status-failed: Deploy failed '${deployment_name}'"
+        echo "--- :bk-status-failed: Deploy failed for '${deployment_name}'"
         exit 1
     fi
 
-    echo "--- :bk-status-passed: Deploy success"
+    echo "--- :bk-status-passed: Deploy success for '${deployment_name}'"
     exit 0
 }
 
@@ -113,6 +105,8 @@ function rollbackDeployment () {
     if [ $? -ne 0 ]; then
         echo "--- :bk-status-failed: Failed to rollback '${deployment_name}'"
         exit 1
+    else
+        echo "--- ↩️  Rollback success for '${deployment_name}'"
     fi
 
     exit 0
