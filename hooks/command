@@ -10,8 +10,12 @@ function updateImage () {
     local should_rollback=0
 
     while [[ -n "${!deployment_name_envvar:-}" ]] ; do
+        local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAMESPACE"
+
         local deployment_name="${!deployment_name_envvar}"
-        current_revisions+=(`kubectl get deployment/$deployment_name -o json | jq -r '.metadata.annotations."deployment.kubernetes.io/revision"'`)
+        local namespace="${!namespace_envvar}"
+
+        current_revisions+=(`kubectl get deployment/$deployment_name -n $namespace -o json | jq -r '.metadata.annotations."deployment.kubernetes.io/revision"'`)
 
         updateDeployment "$i" &
         deploy_pids+=($!)
