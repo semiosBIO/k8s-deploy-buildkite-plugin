@@ -1,13 +1,25 @@
 #!/bin/bash
 
+BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_0_NAMESPACE=default
+BUILDKITE_PLUGIN_K8S_DEPLOY_ROLLBACKONFAIL=true
+BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_1_CONTAINERS_0_CONTAINERNAME=hookshot-sidekiq
+BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_0_NAME=hookshot-deployment
+BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_1_NAMESPACE=default
+BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_1_NAME=hookshot-sidekiq-deployment
+BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_0_CONTAINERS_0_IMAGE=552375026182.dkr.ecr.ap-southeast-2.amazonaws.com/global-hookshot:feature_containers-v4.41.0-27-gc111007-20210218
+BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_1_CONTAINERS_0_IMAGE=552375026182.dkr.ecr.ap-southeast-2.amazonaws.com/global-hookshot:feature_containers-v4.41.0-27-gc111007-20210218
+BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION=updateImage
+BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_0_CONTAINERS_0_CONTAINERNAME=hookshot
+
 function updateImage () {
-    # Start deploys in parallel
     local i=0
     local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAME"
     local current_revisions=()
     local deploy_pids=()
     local exit_codes=()
     local should_rollback=0
+
+    # Start deploys in parallel
 
     while [[ -n "${!deployment_name_envvar:-}" ]] ; do
         local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAMESPACE"
@@ -27,22 +39,17 @@ function updateImage () {
     for i in ${!deploy_pids[@]}; do
         wait ${deploy_pids[$i]}
 
-        exit_codes+=($?)
-
         if [ $? -ne 0 ]; then
             should_rollback=1
         fi
     done
 
-    # Rollback and exit
+    # Rollback and exit if any of the deploy updates has failed
 
     if [ $should_rollback -ne 0 ]; then
-        # Rollback any successful deployments, ignore unsuccesful ones since they should have never deployed
-
-        for i in ${!exit_codes[@]}; do
-            if [ ${exit_codes[$i]} -eq "0" ]; then
-                rollbackDeployment "${i}" "${current_revisions[$i]}" &
-            fi
+        # Rollback all deployments, operation does nothing if the deployment hasn't been changed
+        for i in ${!deploy_pids[@]}; do
+            rollbackDeployment "${i}" "${current_revisions[$i]}" &
         done
 
         wait
@@ -142,27 +149,53 @@ function rollbackDeployment () {
 
 function updateDeployment () {
     local deployment_index=$1
-
-    local i=0
-    local image_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_CONTAINERS_${i}_IMAGE"
-    local container_string=""
-
-    # Extract each container to be updated
-    while [[ -n "${!image_name_envvar:-}" ]] ; do
-        local container_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_CONTAINERS_${i}_CONTAINERNAME"
-
-        container_string=("${container_string} ${!container_name_envvar}=${!image_name_envvar}")
-
-        i=$((i+1))
-        image_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_CONTAINERS_${i}_IMAGE"
-    done
-
     local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_NAMESPACE"
     local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_NAME"
 
     local namespace="${!namespace_envvar:-default}"
     local deployment_name="${!deployment_name_envvar}"
     local timeout="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-300}s"
+
+    local i=0
+    local container_string=""
+    local container_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_CONTAINERS_${i}_CONTAINERNAME"
+
+    # Create a json file for storing patches to the deployment
+    local patch_json_filename="/tmp/${deployment_index}_${BUILDKITE_COMMIT}.json"
+
+    local patch_json_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_PATCHJSON"
+    if [[ ! -z "${!patch_json_envvar:-}" ]]; then
+        echo "${!patch_json_envvar}" > $patch_json_filename
+    else
+        echo "[]" > $patch_json_filename
+    fi
+
+    # Extract each container to be updated
+    while [[ -n "${!container_name_envvar:-}" ]] ; do
+        local image_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_CONTAINERS_${i}_IMAGE"
+
+        local container_name="${!container_name_envvar}"
+        local image_name="${!image_name_envvar}"
+
+        local container_index=$(kubectl get deployment/$deployment_name -n $namespace -o json | jq -r --arg CONTAINER_NAME "$container_name" '.spec.template.spec.containers | map(.name == $CONTAINER_NAME) | index(true)')
+
+        re='^[0-9]+$'
+        if ! [[ $container_index =~ $re ]] ; then
+            echo "--- :bk-status-failed: Container '${container_name}' not found in deployment '${deployment_name}'"
+
+            rm $patch_json_filename
+            exit 1
+        fi
+
+        # Append to the patch json
+        cat <<< $(jq -r --arg PATH "/spec/template/spec/containers/$container_index/image" --arg IMAGE_NAME "$image_name" '. += [{"op":"replace", "path":$PATH, "value":$IMAGE_NAME}]' < $patch_json_filename) > $patch_json_filename
+
+        i=$((i+1))
+        container_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_CONTAINERS_${i}_CONTAINERNAME"
+    done
+
+    # Build annotation
+
     local annotation="Buildkite deploy $(date +'%d-%m-%Y %H:%M')."
 
     if [[ ! -z "${BUILDKITE_UNBLOCKER}" ]]; then
@@ -176,33 +209,21 @@ function updateDeployment () {
 
     echo "--- :kubernetes: Deploying new image to ${deployment_name}"
 
-    local patch_json_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_PATCHJSON"
-    if [[ ! -z "${!patch_json_envvar:-}" ]]; then
-        local temp_filename="/tmp/${deployment_index}_${BUILDKITE_COMMIT}.json"
-        echo "${!patch_json_envvar}" > $temp_filename
-
-        kubectl patch deployment/${deployment_name} --namespace="${namespace}" --type="json" -p="$(cat ${temp_filename})"
-        if [ $? -ne 0 ]; then
-            echo "--- :bk-status-failed: Deployment patch failed for '${deployment_name}'"
-            rm $temp_filename
-            exit 1
-        fi
-
-        rm $temp_filename
-    fi
-
-    kubectl set image deployment/$deployment_name $container_string --record -n $namespace
+    kubectl patch deployment/$deployment_name --namespace=$namespace --type="json" -p="$(cat ${patch_json_filename})"
     if [ $? -ne 0 ]; then
-        echo "--- :bk-status-failed: Failed to set image for '${deployment_name}'"
+        echo "--- :bk-status-failed: Failed to patch deployment for '${deployment_name}'"
+        rm $patch_json_filename
         exit 1
     fi
 
     kubectl annotate deployment/$deployment_name kubernetes.io/change-cause="${annotation}" -n $namespace
     if [ $? -ne 0 ]; then
         echo "--- :bk-status-failed: Failed to annotate deployment for '${deployment_name}'"
+        rm $patch_json_filename
         exit 1
     fi
 
+    rm $patch_json_filename
     exit 0
 }
 
