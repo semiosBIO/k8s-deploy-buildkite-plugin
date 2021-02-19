@@ -169,7 +169,7 @@ function updateDeployment () {
         annotation="${annotation} unblocker='${BUILDKITE_UNBLOCKER}'"
     fi
 
-    local git_commit_string=$(git log --oneline -n 1) || "$BUILDKITE_COMMIT $BUILDKITE_MESSAGE"
+    local git_commit_string=$(git log --oneline -n 1 2> /dev/null) || "$BUILDKITE_COMMIT $BUILDKITE_MESSAGE"
     if [[ ! -z "${BUILDKITE_MESSAGE}" ]]; then
         annotation="${annotation} commit='${git_commit_string}'"
     fi
