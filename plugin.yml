@@ -49,6 +49,18 @@ configuration:
           repositoryUrl: string
           region: string
 
+    # run job
+    jobTemplateUrl:
+      description: "The S3 url of the json template file i.e. s3://my-bucket-name/my_job_template.json "
+      type: string
+    jobImage:
+      description: "URL of the job image i.e. www.mydestinationrepo.com/myimage:latest"
+      type: string
+    jobNamespace:
+      description: "Kubernetes namespace where the job is to be created"
+      type: string
+      default: default
+
     # common settings
     timeout:
       type: integer
@@ -68,5 +80,11 @@ configuration:
       required:
         - sourceImage
         - destinationImages
+    - properties:
+        action:
+          const: runJob
+      required:
+        - jobTemplateUrl
+        - jobImage
 
   additionalProperties: false
