@@ -322,12 +322,130 @@ function promoteImage () {
     fi
 }
 
+function run_job () {
+    local templates_directory="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && cd .. && pwd )/templates"
+    local safe_pipeline_name="$( echo "$BUILDKITE_PIPELINE_NAME" | tr '[:upper:]' '[:lower:]' | tr '_' '-' | tr ' ' '-')"
+    local random_id="$( head -c 5 /dev/urandom | base32 | tr '[:upper:]' '[:lower:]' )"
+    local service_account_name="$BUILDKITE_PLUGIN_K8S_DEPLOY_JOBSERVICEACCOUNTNAME"
+    local namespace="${BUILDKITE_PLUGIN_K8S_DEPLOY_JOBNAMESPACE:-default}"
+
+    JOB_NAME="buildkite-job-$safe_pipeline_name-$random_id"
+    JOB_IMAGE="$BUILDKITE_PLUGIN_K8S_DEPLOY_JOBIMAGE"
+    JOB_TIMEOUT_SECONDS="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-300}"
+
+    local job_json_file="/tmp/$JOB_NAME.json"
+
+    echo "--- :s3: Fetching job template from S3"
+    
+    if ! aws s3 cp $BUILDKITE_PLUGIN_K8S_DEPLOY_JOBTEMPLATEURL $job_json_file ; then
+        echo "--- :bk-status-failed: Failed to download job template from S3"
+        exit 1
+    fi
+
+    export JOB_NAME JOB_IMAGE
+    cat <<< $(envsubst < $job_json_file) > $job_json_file
+
+    # Run the job
+
+    if ! kubectl apply -n $namespace -f $job_json_file ; then
+      echo "--- :bk-status-failed: Job failed to launch"
+      rm $job_json_file
+      exit 1
+    fi
+
+    tail_job_logs "$job_json_file" "$namespace"
+
+    local jobstatus=""
+    while [[ -z "$jobstatus" ]] ; do
+        jobstatus=$(kubectl get job -n $namespace "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
+        sleep 1
+    done
+
+    local exit_code=0
+    case "$jobstatus" in
+        'Complete')
+            echo "--- :bk-status-passed: Job completed successfully"
+            ;;
+        *)
+            exit_code=1
+            echo "--- :bk-status-failed: Job failed with status $jobstatus"
+            ;;
+    esac
+
+    # Clean up
+
+    kubectl delete -n $namespace job/$JOB_NAME
+    rm $job_json_file
+
+    exit $exit_code
+}
+
+
+function tail_job_logs {
+    local namespace=$2
+
+    # Get init container names from the job file if there are any
+
+    if [[ $( cat $1 | jq -r ".spec.template.spec.initContainers" ) != "null" ]]; then
+        local init_container_names=()
+        for row in $(cat $1 | jq -r '.spec.template.spec.initContainers[] | @base64'); do
+            _jq() {
+                echo ${row} | base64 --decode | jq -r ${1}
+            }
+            init_container_names+=($(_jq '.name'))
+        done
+
+        # Tail the logs of the init containers in order
+
+        for container_name in "${init_container_names[@]}"; do
+            echo "--- :k8s: Container ${container_name}"
+
+            while true ; do
+                stdbuf -o0 -e0 kubectl logs -n $namespace -f "job/${JOB_NAME}" -c ${container_name} 2>>/dev/null
+
+                if [ $? -eq 0 ]; then
+                    break
+                else
+                    jobstatus=$(kubectl get job -n $namespace "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
+                    if [[ "$jobstatus" == "Failed" ]]; then
+                        echo "Job failed on init container ${container_name}"
+                        return
+                    fi
+                fi
+            done
+        done
+    fi
+
+    # Tail the main container logs
+
+    local main_container_name=$(cat $1 | jq -r ".spec.template.spec.containers[0].name")
+
+    echo "--- :k8s: Container ${main_container_name}"
+
+    while true ; do
+        stdbuf -o0 -e0 kubectl logs -n $namespace -f "job/${JOB_NAME}" 2>>/dev/null
+
+        if [ $? -eq 0 ]; then
+            break
+        else
+            jobstatus=$(kubectl get job -n $namespace "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
+            if [[ "$jobstatus" == "Failed" ]]; then
+                echo "Job failed on container ${main_container_name}"
+                return
+            fi
+        fi
+    done
+}
+
 case "$BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION" in
     'updateImage')
         updateImage
         ;;
     'promoteImage')
         promoteImage
+        ;;
+    'runJob')
+        run_job
         ;;
     *)
         echo "Invalid action: $BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION"
