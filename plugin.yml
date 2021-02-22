@@ -18,7 +18,14 @@ configuration:
         properties:
           name: string
           namespace: string
-          patchJSON: string
+          patches:
+            type: array
+            items:
+              type: object
+              properties:
+                op: string
+                path: string
+                value: string
           containers:
             type: array
             items:

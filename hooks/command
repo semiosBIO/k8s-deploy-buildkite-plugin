@@ -1,5 +1,7 @@
 #!/bin/bash
 
+env
+
 function updateImage () {
     local i=0
     local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAME"
@@ -143,23 +145,37 @@ function updateDeployment () {
 
     local namespace="${!namespace_envvar:-default}"
     local deployment_name="${!deployment_name_envvar}"
-    local timeout="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-300}s"
+    # Create a json file for storing patches to the deployment
+
+    local patch_json_filename="/tmp/${deployment_index}_${BUILDKITE_COMMIT}.json"
+    echo "[]" > $patch_json_filename
+
+    # Extract each patch to be updated
 
     local i=0
-    local container_string=""
-    local container_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_CONTAINERS_${i}_CONTAINERNAME"
+    local patches_path_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHES_${i}_PATH"
 
-    # Create a json file for storing patches to the deployment
-    local patch_json_filename="/tmp/${deployment_index}_${BUILDKITE_COMMIT}.json"
+    while [[ -n "${!patches_path_envvar:-}" ]] ; do
+        local patches_op_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHES_${i}_OP"
+        local patches_value_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHES_${i}_VALUE"
 
-    local patch_json_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_PATCHJSON"
-    if [[ ! -z "${!patch_json_envvar:-}" ]]; then
-        echo "${!patch_json_envvar}" > $patch_json_filename
-    else
-        echo "[]" > $patch_json_filename
-    fi
+        local op="${!patches_op_envvar}"
+        local path="${!patches_path_envvar}"
+        local value="${!patches_value_envvar}"
+
+        # Append to the patch json
+        cat <<< $(jq -r --arg PATH "/spec/template/spec/containers/$container_index/image" \
+            --arg OP "$op" --arg PATH "$path" --arg VALUE "$value" \
+            '. += [{"op":$OP, "path":$PATH, "value":$VALUE}]' < $patch_json_filename) > $patch_json_filename
+
+        i=$((i+1))
+        patches_path_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHES_${i}_PATH"
+    done
 
     # Extract each container to be updated
+    i=0
+    local container_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_CONTAINERS_${i}_CONTAINERNAME"
+
     while [[ -n "${!container_name_envvar:-}" ]] ; do
         local image_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_CONTAINERS_${i}_IMAGE"
 
@@ -168,6 +184,7 @@ function updateDeployment () {
 
         local container_index=$(kubectl get deployment/$deployment_name -n $namespace -o json | jq -r --arg CONTAINER_NAME "$container_name" '.spec.template.spec.containers | map(.name == $CONTAINER_NAME) | index(true)')
 
+        # Ensure container_index is numeric and not null
         re='^[0-9]+$'
         if ! [[ $container_index =~ $re ]] ; then
             echo "--- :bk-status-failed: Container '${container_name}' not found in deployment '${deployment_name}'"
