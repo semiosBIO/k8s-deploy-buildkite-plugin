@@ -38,12 +38,15 @@ function updateImage () {
     # Rollback and exit if any of the deploy updates has failed
 
     if [ $should_rollback -ne 0 ]; then
-        # Rollback all deployments, operation does nothing if the deployment hasn't been changed
+      # Rollback all deployments
+        echo "--- :bk-status-failed: One or more deploys has failed to patch, rolling back deployment"
+
         for i in ${!deploy_pids[@]}; do
             rollbackDeployment "${i}" "${current_revisions[$i]}" &
         done
 
         wait
+        echo "--- :bk-status-passed: Rollback complete"
         exit 1
     fi
 
@@ -67,7 +70,7 @@ function updateImage () {
     # Rollback and exit
 
     if [ $should_rollback -ne 0 ]; then
-        # Rollback any successful deployments, ignore unsuccesful ones since they should have never deployed
+        # Rollback all deployments
         echo "--- :bk-status-failed: One or more deploys has failed, rolling back deployment"
 
         for i in ${!exit_codes[@]}; do
@@ -75,9 +78,7 @@ function updateImage () {
         done
 
         wait
-
         echo "--- :bk-status-passed: Rollback complete"
-
         exit 1
     fi
 
