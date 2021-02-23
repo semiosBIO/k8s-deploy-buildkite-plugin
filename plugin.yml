@@ -11,25 +11,33 @@ configuration:
         - promoteImage
 
     # updateImage options
-    namespace:
-      type: string
-      default: default
-    deploymentName:
-      type: string
-    containers:
+    deployments:
       type: array
       items:
         type: object
         properties:
-          image:
-            type: string
-          containerName:
-            type: string
-        required:
-          - image
-          - containerName
-    patchJSON:
-      type: string
+          name: string
+          namespace: string
+          patches:
+            type: array
+            items:
+              type: object
+              properties:
+                op: string
+                path: string
+                value: string
+          containers:
+            type: array
+            items:
+              type: object
+              properties:
+                image:
+                  type: string
+                containerName:
+                  type: string
+              required:
+                - image
+                - containerName
 
     # promoteImage options
     sourceImage:
@@ -71,9 +79,7 @@ configuration:
         action:
           const: updateImage
       required:
-        - namespace
-        - deploymentName
-        - containers
+        - deployments
     - properties:
         action:
           const: promoteImage
