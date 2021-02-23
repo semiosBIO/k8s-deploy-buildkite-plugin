@@ -159,11 +159,11 @@ function updateDeployment () {
     # Extract each patch to be updated
 
     local i=0
-    local patches_path_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHES_${i}_PATH"
+    local patches_path_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_PATCHES_${i}_PATH"
 
     while [[ -n "${!patches_path_envvar:-}" ]] ; do
-        local patches_op_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHES_${i}_OP"
-        local patches_value_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHES_${i}_VALUE"
+        local patches_op_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_PATCHES_${i}_OP"
+        local patches_value_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_PATCHES_${i}_VALUE"
 
         local op="${!patches_op_envvar}"
         local path="${!patches_path_envvar}"
@@ -175,7 +175,7 @@ function updateDeployment () {
             '. += [{"op":$OP, "path":$PATH, "value":$VALUE}]' < $patch_json_filename) > $patch_json_filename
 
         i=$((i+1))
-        patches_path_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_PATCHES_${i}_PATH"
+        patches_path_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_PATCHES_${i}_PATH"
     done
 
     # Extract each container to be updated
