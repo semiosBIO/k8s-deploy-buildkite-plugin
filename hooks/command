@@ -170,8 +170,7 @@ function updateDeployment () {
         local value="${!patches_value_envvar}"
 
         # Append to the patch json
-        cat <<< $(jq -r --arg PATH "/spec/template/spec/containers/$container_index/image" \
-            --arg OP "$op" --arg PATH "$path" --arg VALUE "$value" \
+        cat <<< $(jq -r --arg OP "$op" --arg PATH "$path" --arg VALUE "$value" \
             '. += [{"op":$OP, "path":$PATH, "value":$VALUE}]' < $patch_json_filename) > $patch_json_filename
 
         i=$((i+1))
@@ -220,6 +219,9 @@ function updateDeployment () {
     fi
 
     echo "--- :kubernetes: Deploying new image to ${deployment_name}"
+
+    echo "Applying patch JSON"
+    cat $patch_json_filename
 
     kubectl patch deployment/$deployment_name --namespace=$namespace --type="json" -p="$(cat ${patch_json_filename})"
     if [ $? -ne 0 ]; then
