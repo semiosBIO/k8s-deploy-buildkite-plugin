@@ -311,7 +311,7 @@ function promoteImage () {
 
         docker rmi ${!destination_repository_url_envvar}/${!destination_image_envvar}
 
-        if [ push_exit_code -ne 0 ]; then
+        if [ "$push_exit_code" -ne "0" ]; then
             echo "--- :bk-status-failed: Promotion failed. Push failed to destination repository ${!destination_repository_url_envvar}"
             failure_count=$((failure_count+1))
         else

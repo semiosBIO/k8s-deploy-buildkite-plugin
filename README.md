@@ -74,7 +74,7 @@ plugins:
             - containerName: app
               image: "000000000000.dkr.ecr.ap-southeast-2.amazonaws.com/my-awesome-app:${DOCKER_TAG}"
 
-        - name: my-awesome-app-background-workler
+        - name: my-awesome-app-background-worker
             namespace: default
             patches:
             - op: "replace"
