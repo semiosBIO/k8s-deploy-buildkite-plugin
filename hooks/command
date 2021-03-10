@@ -5,6 +5,7 @@ function updateImage () {
     local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAME"
     local current_revisions=()
     local deploy_pids=()
+    local cron_pids=()
     local exit_codes=()
     local should_rollback=0
 
@@ -27,8 +28,33 @@ function updateImage () {
         deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAME"
     done
 
+    # Update cronjobs, if any
+
+    local j=0
+    local cronjob_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_CRONJOBS_${j}_NAME"
+
+    while [[ -n "${!cronjob_name_envvar:-}" ]] ; do
+        local cronjob_name="${!cronjob_name_envvar}"
+
+        echo "Cronjob '$cronjob_name'"
+
+        updateCronJob "$j" &
+        cron_pids+=($!)
+
+        j=$((j+1))
+        cronjob_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_CRONJOBS_${j}_NAME"
+    done
+
     for i in ${!deploy_pids[@]}; do
         wait ${deploy_pids[$i]}
+
+        if [ $? -ne 0 ]; then
+            should_rollback=1
+        fi
+    done
+
+    for i in ${!cron_pids[@]}; do
+        wait ${cron_pids[$i]}
 
         if [ $? -ne 0 ]; then
             should_rollback=1
@@ -144,6 +170,92 @@ function rollbackDeployment () {
     exit 0
 }
 
+function generatePatchFile () {
+    local filename="$1"
+    local object_type="$2"
+    local index=$3
+
+    echo "[]" > $filename
+
+    # Extract each patch to be updated
+
+    local i=0
+    local patches_path_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_${object_type}_${index}_PATCHES_${i}_PATH"
+
+    while [[ -n "${!patches_path_envvar:-}" ]] ; do
+        local patches_op_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_${object_type}_${index}_PATCHES_${i}_OP"
+        local patches_value_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_${object_type}_${index}_PATCHES_${i}_VALUE"
+
+        local op="${!patches_op_envvar}"
+        local path="${!patches_path_envvar}"
+        local value="${!patches_value_envvar}"
+
+        # Append to the patch json
+        cat <<< $(jq -r --arg OP "$op" --arg PATH "$path" --arg VALUE "$value" \
+            '. += [{"op":$OP, "path":$PATH, "value":$VALUE}]' < $filename) > $filename
+
+        i=$((i+1))
+        patches_path_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_${object_type}_${index}_PATCHES_${i}_PATH"
+    done
+}
+
+function updateCronJob () {
+    local cronjob_index=$1
+    local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_CRONJOBS_${cronjob_index}_NAMESPACE"
+    local cronjob_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_CRONJOBS_${cronjob_index}_NAME"
+
+    local patch_json_filename="/tmp/${cronjob_index}_${BUILDKITE_COMMIT}_c.json"
+    generatePatchFile "$patch_json_filename" "CRONJOBS" $cronjob_index
+
+    # Extract each container to be updated
+    i=0
+    local container_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_CRONJOBS_${cronjob_index}_CONTAINERS_${i}_CONTAINERNAME"
+    local cronjob_name="${!cronjob_name_envvar}"
+
+    while [[ -n "${!container_name_envvar:-}" ]] ; do
+        local image_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_CRONJOBS_${cronjob_index}_CONTAINERS_${i}_IMAGE"
+
+        local container_name="${!container_name_envvar}"
+        local image_name="${!image_name_envvar}"
+
+        local container_index=$(kubectl get cronjob/$cronjob_name -n $namespace -o json | jq -r --arg CONTAINER_NAME "$container_name" '.spec.jobTemplate.spec.template.spec.containers | map(.name == $CONTAINER_NAME) | index(true)')
+
+        # Ensure container_index is numeric and not null
+        re='^[0-9]+$'
+        if ! [[ $container_index =~ $re ]] ; then
+            echo "--- :bk-status-failed: Container '${container_name}' not found in cronjob '${cronjob_name}'"
+
+            rm $patch_json_filename
+            exit 1
+        fi
+
+        # Record rollback information
+        local current_image=$(kubectl get cronjob/$cronjob_name -n $namespace -o json | jq -r --argjson INDEX $container_index '.spec.jobTemplate.spec.template.spec.containers[$INDEX].image')
+        echo "Can be rolled back with # kubectl set image cronjob/${cronjob_name} -n ${namespace} ${container_name}=\"${current_image}\" "
+
+        # Append to the patch json
+        cat <<< $(jq -r --arg PATH "/spec/jobTemplate/spec/template/spec/containers/$container_index/image" --arg IMAGE_NAME "$image_name" '. += [{"op":"replace", "path":$PATH, "value":$IMAGE_NAME}]' < $patch_json_filename) > $patch_json_filename
+
+        i=$((i+1))
+        container_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_CRONJOBS_${cronjob_index}_CONTAINERS_${i}_CONTAINERNAME"
+    done
+
+    echo "--- :kubernetes: Deploying new image to ${cronjob_name}"
+
+    echo "Applying patch JSON"
+    cat $patch_json_filename
+
+    kubectl patch cronjob/$cronjob_name --namespace=$namespace --type="json" -p="$(cat ${patch_json_filename})"
+    if [ $? -ne 0 ]; then
+        echo "--- :bk-status-failed: Failed to patch cronjob for '${cronjob_name}'"
+        rm $patch_json_filename
+        exit 1
+    fi
+
+    rm $patch_json_filename
+    exit 0
+}
+
 function updateDeployment () {
     local deployment_index=$1
     local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_NAMESPACE"
@@ -153,29 +265,8 @@ function updateDeployment () {
     local deployment_name="${!deployment_name_envvar}"
     # Create a json file for storing patches to the deployment
 
-    local patch_json_filename="/tmp/${deployment_index}_${BUILDKITE_COMMIT}.json"
-    echo "[]" > $patch_json_filename
-
-    # Extract each patch to be updated
-
-    local i=0
-    local patches_path_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_PATCHES_${i}_PATH"
-
-    while [[ -n "${!patches_path_envvar:-}" ]] ; do
-        local patches_op_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_PATCHES_${i}_OP"
-        local patches_value_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_PATCHES_${i}_VALUE"
-
-        local op="${!patches_op_envvar}"
-        local path="${!patches_path_envvar}"
-        local value="${!patches_value_envvar}"
-
-        # Append to the patch json
-        cat <<< $(jq -r --arg OP "$op" --arg PATH "$path" --arg VALUE "$value" \
-            '. += [{"op":$OP, "path":$PATH, "value":$VALUE}]' < $patch_json_filename) > $patch_json_filename
-
-        i=$((i+1))
-        patches_path_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_PATCHES_${i}_PATH"
-    done
+    local patch_json_filename="/tmp/${deployment_index}_${BUILDKITE_COMMIT}_d.json"
+    generatePatchFile "$patch_json_filename" "DEPLOYMENTS" $deployment_index
 
     # Extract each container to be updated
     i=0
@@ -283,7 +374,7 @@ function promoteImage () {
             echo "--- :bk-status-failed: Promotion failed. Authentication failed with destination repository ${!destination_repository_url_envvar}"
             exit 1
         fi
-        
+
         # Tag and push the image
         docker tag $BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_REPOSITORYURL/$BUILDKITE_PLUGIN_K8S_DEPLOY_SOURCEIMAGE_IMAGE ${!destination_repository_url_envvar}/${!destination_image_envvar}
 
@@ -350,7 +441,7 @@ function run_job () {
     local job_json_file="/tmp/$JOB_NAME.json"
 
     echo "--- :s3: Fetching job template from S3"
-    
+
     if ! aws s3 cp $BUILDKITE_PLUGIN_K8S_DEPLOY_JOBTEMPLATEURL $job_json_file ; then
         echo "--- :bk-status-failed: Failed to download job template from S3"
         exit 1
