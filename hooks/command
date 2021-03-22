@@ -287,7 +287,7 @@ function updateDeployment () {
     local namespace="${!namespace_envvar:-default}"
     # Create a json file for storing patches to the deployment
 
-    local patch_json_filename="/tmp/${deployment_index}_${BUILDKITE_COMMIT}_d.json"
+    local patch_json_filename="/tmp/${deployment_name}_${BUILDKITE_COMMIT}_d.json"
     generatePatchFile "$patch_json_filename" "DEPLOYMENTS" $deployment_index
 
     # Extract each container to be updated
