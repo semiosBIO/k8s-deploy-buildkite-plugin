@@ -138,10 +138,9 @@ function updateImage () {
     echo "Use the below commands to rollback the deployments to thier previous revision."
     for i in ${!current_revisions[@]}; do
         local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAMESPACE"
-        local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAME"
 
         local namespace="${!namespace_envvar:-default}"
-        local deployment_name="${!deployment_name_envvar}"
+        local deployment_name="${deployment_names[$i]}"
         local original_revision=${current_revisions[$i]}
 
         echo "# kubectl rollout undo deployment/$deployment_name -n $namespace --to-revision=$original_revision"
