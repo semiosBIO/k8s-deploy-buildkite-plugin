@@ -18,6 +18,7 @@ configuration:
         type: object
         properties:
           name: string
+          label: string
           namespace: string
           patches:
             type: array

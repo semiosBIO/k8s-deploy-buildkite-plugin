@@ -3,11 +3,13 @@
 function updateImage () {
     local i=0
     local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAME"
+    local deployment_label_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_LABEL"
     local current_revisions=()
     local deploy_pids=()
     local cron_pids=()
     local exit_codes=()
     local should_rollback=0
+    local deployment_names=()
 
     # Start deploys in parallel
 
@@ -17,15 +19,38 @@ function updateImage () {
         local deployment_name="${!deployment_name_envvar}"
         local namespace="${!namespace_envvar}"
 
+        deployment_names+=($deployment_name)
         current_revisions+=(`kubectl get deployment/$deployment_name -n $namespace -o json | jq -r '.metadata.annotations."deployment.kubernetes.io/revision"'`)
 
         echo "Deployment '$deployment_name' current_revision=${current_revisions[$i]}"
 
-        updateDeployment "$i" &
+        updateDeployment "$i" "$deployment_name" &
         deploy_pids+=($!)
 
         i=$((i+1))
         deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAME"
+    done
+
+    i=0
+    while [[ -n "${!deployment_label_envvar:-}" ]] ; do
+        local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAMESPACE"
+        local namespace="${!namespace_envvar}"
+
+        local labelled_deployments=($(kubectl get deployments.apps -n $namespace -l "${!deployment_label_envvar}" -o json | jq -r '.items[] | .metadata.name'))
+
+        # Add N namespace entries so lengths match
+        for deployment_name in "${labelled_deployments[@]}"; do
+            deployment_names+=($deployment_name)
+            current_revisions+=(`kubectl get deployment/$deployment_name -n $namespace -o json | jq -r '.metadata.annotations."deployment.kubernetes.io/revision"'`)
+
+            echo "Deployment '$deployment_name' current_revision=${current_revisions[$i]}"
+
+            updateDeployment "$i" "$deployment_name" &
+            deploy_pids+=($!)
+        done
+
+        i=$((i+1))
+        deployment_label_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_LABEL"
     done
 
     # Update cronjobs, if any
@@ -68,7 +93,7 @@ function updateImage () {
         echo "--- :bk-status-failed: One or more deploys has failed to patch, rolling back deployment"
 
         for i in ${!deploy_pids[@]}; do
-            rollbackDeployment "${i}" "${current_revisions[$i]}" &
+            rollbackDeployment "${i}" "${deployment_names[$i]}" "${current_revisions[$i]}" &
         done
 
         wait
@@ -81,7 +106,7 @@ function updateImage () {
     local rollout_pids=()
 
     for i in ${!deploy_pids[@]}; do
-        waitForDeploymentRollout "${i}" &
+        waitForDeploymentRollout "${i}" "${deployment_names[$i]}" &
         rollout_pids+=($!)
     done
 
@@ -100,7 +125,7 @@ function updateImage () {
         echo "--- :bk-status-failed: One or more deploys has failed, rolling back deployment"
 
         for i in ${!exit_codes[@]}; do
-            rollbackDeployment "${i}" "${current_revisions[$i]}" &
+            rollbackDeployment "${i}" "${deployment_names[$i]}" "${current_revisions[$i]}" &
         done
 
         wait
@@ -113,10 +138,9 @@ function updateImage () {
     echo "Use the below commands to rollback the deployments to thier previous revision."
     for i in ${!current_revisions[@]}; do
         local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAMESPACE"
-        local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${i}_NAME"
 
         local namespace="${!namespace_envvar:-default}"
-        local deployment_name="${!deployment_name_envvar}"
+        local deployment_name="${deployment_names[$i]}"
         local original_revision=${current_revisions[$i]}
 
         echo "# kubectl rollout undo deployment/$deployment_name -n $namespace --to-revision=$original_revision"
@@ -129,11 +153,10 @@ function updateImage () {
 
 function waitForDeploymentRollout () {
     local deployment_index=$1
+    local deployment_name="$2"
     local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_NAMESPACE"
-    local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_NAME"
-
     local namespace="${!namespace_envvar:-default}"
-    local deployment_name="${!deployment_name_envvar}"
+
     local timeout="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-300}s"
 
     if ! kubectl rollout status deployment/$deployment_name -n $namespace --timeout=$timeout ; then
@@ -147,13 +170,12 @@ function waitForDeploymentRollout () {
 
 function rollbackDeployment () {
     local deployment_index=$1
-    local original_revision=$2
+    local deployment_name=$2
+    local original_revision=$3
 
     local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_NAMESPACE"
-    local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_NAME"
 
     local namespace="${!namespace_envvar:-default}"
-    local deployment_name="${!deployment_name_envvar}"
 
 
     echo "--- ↩️  Rolling back '${deployment_name}' to revision $original_revision"
@@ -258,14 +280,13 @@ function updateCronJob () {
 
 function updateDeployment () {
     local deployment_index=$1
+    local deployment_name="$2"
     local namespace_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_NAMESPACE"
-    local deployment_name_envvar="BUILDKITE_PLUGIN_K8S_DEPLOY_DEPLOYMENTS_${deployment_index}_NAME"
 
     local namespace="${!namespace_envvar:-default}"
-    local deployment_name="${!deployment_name_envvar}"
     # Create a json file for storing patches to the deployment
 
-    local patch_json_filename="/tmp/${deployment_index}_${BUILDKITE_COMMIT}_d.json"
+    local patch_json_filename="/tmp/${deployment_name}_${BUILDKITE_COMMIT}_d.json"
     generatePatchFile "$patch_json_filename" "DEPLOYMENTS" $deployment_index
 
     # Extract each container to be updated
