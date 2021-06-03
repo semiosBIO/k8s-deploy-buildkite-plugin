@@ -491,6 +491,7 @@ function run_job () {
     case "$jobstatus" in
         'Complete')
             echo "--- :bk-status-passed: Job completed successfully"
+            kubectl delete -n $namespace job/$JOB_NAME
             ;;
         *)
             exit_code=1
@@ -499,8 +500,6 @@ function run_job () {
     esac
 
     # Clean up
-
-    kubectl delete -n $namespace job/$JOB_NAME
     rm $job_json_file
 
     exit $exit_code
