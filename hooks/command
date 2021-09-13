@@ -523,7 +523,7 @@ function tail_job_logs {
         # Tail the logs of the init containers in order
 
         for container_name in "${init_container_names[@]}"; do
-            echo "--- :k8s: Container ${container_name}"
+            echo "--- :k8s: Init container ${container_name}"
 
             while true ; do
                 stdbuf -o0 -e0 kubectl logs -n $namespace -f "job/${JOB_NAME}" -c ${container_name} 2>>/dev/null
@@ -543,19 +543,17 @@ function tail_job_logs {
 
     # Tail the main container logs
 
-    local main_container_name=$(cat $1 | jq -r ".spec.template.spec.containers[0].name")
-
-    echo "--- :k8s: Container ${main_container_name}"
+    echo "--- :k8s: Main containers"
 
     while true ; do
-        stdbuf -o0 -e0 kubectl logs -n $namespace -f "job/${JOB_NAME}" -c "${main_container_name}" 2>>/dev/null
+        stdbuf -o0 -e0 kubectl logs -n $namespace -f "job/${JOB_NAME}" --all-containers=true 2>>/dev/null
 
         if [ $? -eq 0 ]; then
             break
         else
             jobstatus=$(kubectl get job -n $namespace "${JOB_NAME}" -o 'jsonpath={.status.conditions[].type}')
             if [[ "$jobstatus" == "Failed" ]]; then
-                echo "Job failed on container ${main_container_name}"
+                echo "Job failed"
                 return
             fi
         fi
