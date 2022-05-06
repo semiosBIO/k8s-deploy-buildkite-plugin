@@ -1,7 +1,9 @@
 name: K8s Deploy Plugin
 description: Deploys applications to a kubernetes cluster. Requires the agent to have kubectl and a valid config for your cluster
 author: https://github.com/agworld
-requirements: []
+requirements:
+  - kubectl
+  - helm
 configuration:
   properties:
     action:
@@ -10,6 +12,22 @@ configuration:
         - updateImage
         - promoteImage
         - runJob
+        - helmDeploy
+
+    # helmDeploy options
+
+    chart:
+      type: string
+
+    release:
+      type: string
+
+    tag:
+      type: string
+
+    namespace:
+      type: string
+      default: default
 
     # updateImage options
     deployments:
@@ -123,5 +141,12 @@ configuration:
       required:
         - jobTemplateUrl
         - jobImage
+    - properties:
+        action:
+          const: helmDeploy
+      required:
+        - release
+        - chart
+        - tag
 
   additionalProperties: false

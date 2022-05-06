@@ -560,6 +560,26 @@ function tail_job_logs {
     done
 }
 
+function helm_deploy() {
+  local chart="${BUILDKITE_PLUGIN_K8S_DEPLOY_CHART}"
+  local release="${BUILDKITE_PLUGIN_K8S_DEPLOY_RELEASE}"
+  local tag="${BUILDKITE_PLUGIN_K8S_DEPLOY_TAG}"
+  local namespace="${BUILDKITE_PLUGIN_K8S_NAMESPACE:-default}"
+  local random_id="$( head -c 5 /dev/urandom | base32 | tr '[:upper:]' '[:lower:]' )"
+
+  # Update the repo index - all repos
+  helm repo update
+
+  # Store the overridden values in a temporary file
+  helm get values ${release} -o yaml -n ${namespace} > "/tmp/${release}-${random_id}-values.yaml"
+
+  # Upgrade the image tag for the selected release
+  helm upgrade "${release}" "${chart}" -f "/tmp/${release}-${random_id}-values.yaml" --set image.tag="${DOCKER_TAG}" -n ${namespace}
+
+  # Cleanup
+  rm "/tmp/${release}-${random_id}-values.yaml"
+}
+
 case "$BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION" in
     'updateImage')
         updateImage
@@ -569,6 +589,9 @@ case "$BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION" in
         ;;
     'runJob')
         run_job
+        ;;
+    'helmDeploy')
+        helm_deploy
         ;;
     *)
         echo "Invalid action: $BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION"
