@@ -568,16 +568,18 @@ function helm_deploy() {
 
   echo "--- :helm: Update ${release} of ${chart} to use the image tag ${tag}"
 
+  echo "${BUILDKITE_PLUGIN_K8S_DEPLOY_VALUES}"
+
   # Update the repo index - all repos
-  helm repo update
+#  helm repo update
 
   # Upgrade the image tag for the selected release
-  helm upgrade --atomic --reuse-values --set image.tag="${tag}" -n "${namespace}" "${release}" "${chart}"
+#  helm upgrade --atomic --reuse-values --set image.tag="${tag}" -n "${namespace}" "${release}" "${chart}"
 
-  if [ "$?" -ne "0" ]; then
-    echo "--- :bk-status-failed: Failed to update ${release} of ${chart}"
-    exit 1
-  fi
+  # if [ "$?" -ne "0" ]; then
+  #   echo "--- :bk-status-failed: Failed to update ${release} of ${chart}"
+  #   exit 1
+  # fi
 
   exit 0
 }

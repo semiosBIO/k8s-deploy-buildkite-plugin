@@ -29,6 +29,9 @@ configuration:
       type: string
       default: default
 
+    values:
+      type: string
+
     # updateImage options
     deployments:
       type: array
