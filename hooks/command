@@ -565,6 +565,7 @@ function helm_deploy() {
   local release="${BUILDKITE_PLUGIN_K8S_DEPLOY_RELEASE}"
   local tag="${BUILDKITE_PLUGIN_K8S_DEPLOY_TAG}"
   local namespace="${BUILDKITE_PLUGIN_K8S_DEPLOY_NAMESPACE:-default}"
+  local values_file="$(mktemp)"
 
   set -o pipefail
 
@@ -573,39 +574,41 @@ function helm_deploy() {
   # Update the repo index - all repos
   helm repo update
 
+  # Values file
+  echo "${BUILDKITE_PLUGIN_K8S_DEPLOY_VALUES}" > "${values_file}"
+
+  exit_code=0
   # Check that the requested release already present
   status=$(helm status ${release} -n "${namespace}" | grep STATUS | cut -c 9-)
 
   if [ "$?" -ne "0" ]; then
     # Create a new release as requested
-    local values_file="/tmp/$(head -c 5 /dev/urandom | base32 | tr '[:upper:]' '[:lower:]')-values.yml"
-
     echo "Release ${release} not found, creating"
-
-    echo "${BUILDKITE_PLUGIN_K8S_DEPLOY_VALUES}" > "${values_file}"
 
     helm install --atomic -f "${values_file}" --set image.tag="${tag}" -n "${namespace}" "${release}" "${chart}"
 
     if [ "$?" -ne "0" ]; then
       echo "--- :bk-status-failed: Failed to install ${release} of ${chart}"
-      rm -f "${values_file}"
-      exit 1
+      exit_code=1
     fi
 
-    rm -f "${values_file}"
+  elif [ "${status}" != "deployed" ]; then
+      echo "--- :bk-status-failed: ${release} is in the wrong status '${status}' - expected 'deployed'"
+      exit_code=1
   else
-    echo "Found ${release}, status ${status}"
+    echo "Found ${release}, updating"
 
     # Upgrade the image tag for the selected release
-    helm upgrade --atomic --reuse-values --set image.tag="${tag}" -n "${namespace}" "${release}" "${chart}"
+    helm upgrade --atomic -f "${values_file}" --set image.tag="${tag}" -n "${namespace}" "${release}" "${chart}"
 
     if [ "$?" -ne "0" ]; then
       echo "--- :bk-status-failed: Failed to update ${release} of ${chart}"
-      exit 1
+      exit_code=1
     fi
   fi
 
-  exit 0
+  rm -f "${values_file}"
+  exit $exit_code
 }
 
 case "$BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION" in

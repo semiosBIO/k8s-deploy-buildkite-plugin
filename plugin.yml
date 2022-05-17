@@ -151,5 +151,6 @@ configuration:
         - release
         - chart
         - tag
+        - values
 
   additionalProperties: false
