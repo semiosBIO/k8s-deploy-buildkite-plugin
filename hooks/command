@@ -560,6 +560,57 @@ function tail_job_logs {
     done
 }
 
+function helm_deploy() {
+  local chart="${BUILDKITE_PLUGIN_K8S_DEPLOY_CHART}"
+  local release="${BUILDKITE_PLUGIN_K8S_DEPLOY_RELEASE}"
+  local tag="${BUILDKITE_PLUGIN_K8S_DEPLOY_TAG}"
+  local namespace="${BUILDKITE_PLUGIN_K8S_DEPLOY_NAMESPACE:-default}"
+  local values_file="$(mktemp)"
+
+  set -o pipefail
+
+  echo "--- :helm: Update ${release} of ${chart} to use the image tag ${tag}"
+
+  # Update the repo index - all repos
+  helm repo update
+
+  # Values file
+  echo "${BUILDKITE_PLUGIN_K8S_DEPLOY_VALUES}" > "${values_file}"
+
+  exit_code=0
+  # Check that the requested release already present
+  status=$(helm status ${release} -n "${namespace}" | grep STATUS | cut -c 9-)
+
+  if [ "$?" -ne "0" ]; then
+    # Create a new release as requested
+    echo "Release ${release} not found, creating"
+
+    helm install --atomic -f "${values_file}" --set image.tag="${tag}" -n "${namespace}" "${release}" "${chart}"
+
+    if [ "$?" -ne "0" ]; then
+      echo "--- :bk-status-failed: Failed to install ${release} of ${chart}"
+      exit_code=1
+    fi
+
+  elif [ "${status}" != "deployed" ]; then
+      echo "--- :bk-status-failed: ${release} is in the wrong status '${status}' - expected 'deployed'"
+      exit_code=1
+  else
+    echo "Found ${release}, updating"
+
+    # Upgrade the image tag for the selected release
+    helm upgrade --atomic -f "${values_file}" --set image.tag="${tag}" -n "${namespace}" "${release}" "${chart}"
+
+    if [ "$?" -ne "0" ]; then
+      echo "--- :bk-status-failed: Failed to update ${release} of ${chart}"
+      exit_code=1
+    fi
+  fi
+
+  rm -f "${values_file}"
+  exit $exit_code
+}
+
 case "$BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION" in
     'updateImage')
         updateImage
@@ -569,6 +620,9 @@ case "$BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION" in
         ;;
     'runJob')
         run_job
+        ;;
+    'helmDeploy')
+        helm_deploy
         ;;
     *)
         echo "Invalid action: $BUILDKITE_PLUGIN_K8S_DEPLOY_ACTION"
