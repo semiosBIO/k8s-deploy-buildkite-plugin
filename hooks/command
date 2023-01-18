@@ -568,6 +568,12 @@ function helm_deploy() {
   local values_file="$(mktemp)"
   local timeout="${BUILDKITE_PLUGIN_K8S_DEPLOY_TIMEOUT:-300}s"
 
+  if [[ "${BUILDKITE_PLUGIN_K8S_DEPLOY_ATOMIC:-true}" == "true" ]]; then
+      local atomic_flag="--atomic"
+  else
+      local atomic_flag=""
+  fi
+
   set -o pipefail
 
   echo "--- :helm: Update ${release} of ${chart} to use the image tag ${tag}"
@@ -586,7 +592,7 @@ function helm_deploy() {
     # Create a new release as requested
     echo ":confused: Release ${release} not found, creating"
 
-    helm install --atomic -f "${values_file}" --set image.tag="${tag}" -n "${namespace}" --timeout "${timeout}" --debug "${release}" "${chart}"
+    helm install "${atomic_flag}" -f "${values_file}" --set image.tag="${tag}" -n "${namespace}" --timeout "${timeout}" --debug "${release}" "${chart}"
 
     if [ "$?" -ne "0" ]; then
       echo "--- :bk-status-failed: Failed to install ${release} of ${chart}"
@@ -600,7 +606,7 @@ function helm_deploy() {
     echo ":slightly_smiling_face: Found ${release}, updating"
 
     # Upgrade the image tag for the selected release
-    helm upgrade --atomic -f "${values_file}" --set image.tag="${tag}" -n "${namespace}" --timeout "${timeout}" --debug "${release}" "${chart}"
+    helm upgrade "${atomic_flag}" -f "${values_file}" --set image.tag="${tag}" -n "${namespace}" --timeout "${timeout}" --debug "${release}" "${chart}"
 
     if [ "$?" -ne "0" ]; then
       echo "--- :bk-status-failed: Failed to update ${release} of ${chart}"
