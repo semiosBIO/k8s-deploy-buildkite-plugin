@@ -562,6 +562,7 @@ function tail_job_logs {
 
 function helm_deploy() {
   local chart="${BUILDKITE_PLUGIN_K8S_DEPLOY_CHART}"
+  local chart_version="${BUILDKITE_PLUGIN_K8S_DEPLOY_CHART_VERSION}"
   local release="${BUILDKITE_PLUGIN_K8S_DEPLOY_RELEASE}"
   local tag="${BUILDKITE_PLUGIN_K8S_DEPLOY_TAG}"
   local namespace="${BUILDKITE_PLUGIN_K8S_DEPLOY_NAMESPACE:-default}"
@@ -570,7 +571,7 @@ function helm_deploy() {
 
   set -o pipefail
 
-  echo "--- :helm: Update ${release} of ${chart} to use the image tag ${tag}"
+  echo "--- :helm: Update release (${release}) with tag(${tag}) using chart (${chart}) at version (${chart_version})"
 
   # Update the repo index - all repos
   helm repo update
@@ -579,34 +580,27 @@ function helm_deploy() {
   echo "${BUILDKITE_PLUGIN_K8S_DEPLOY_VALUES}" > "${values_file}"
 
   exit_code=0
-  # Check that the requested release already present
-  status=$(helm status ${release} -n "${namespace}" | grep STATUS | cut -c 9-)
 
-  if [ "$?" -ne "0" ]; then
-    # Create a new release as requested
-    echo ":confused: Release ${release} not found, creating"
+  helm_status=$(helm status "${release}" -n "${namespace}")
+  deploy_status=$(echo "${helm_status}" | grep STATUS |cut -c 9-)
 
-    helm install --atomic -f "${values_file}" --set image.tag="${tag}" -n "${namespace}" --timeout "${timeout}" --debug "${release}" "${chart}"
-
-    if [ "$?" -ne "0" ]; then
-      echo "--- :bk-status-failed: Failed to install ${release} of ${chart}"
-      exit_code=1
-    fi
-
-  elif [ "${status}" != "deployed" ]; then
-      echo "--- :bk-status-failed: ${release} is in the wrong status '${status}' - expected 'deployed'"
-      exit_code=1
-  else
-    echo ":slightly_smiling_face: Found ${release}, updating"
-
-    # Upgrade the image tag for the selected release
-    helm upgrade --atomic -f "${values_file}" --set image.tag="${tag}" -n "${namespace}" --timeout "${timeout}" --debug "${release}" "${chart}"
-
-    if [ "$?" -ne "0" ]; then
-      echo "--- :bk-status-failed: Failed to update ${release} of ${chart}"
-      exit_code=1
-    fi
-  fi
+  case "$deploy_status" in
+      unknown|uninstalled|superseded|failed|uninstalling|pending-install|pending-upgrade|pending-rollback)
+          echo "--- :bk-status-failed: ${release} is in the wrong status '${deploy_status}' - expected 'deployed'"
+          exit_code=1
+          ;;
+      deployed|"")
+          if [ "$deploy_status" == "" ]; then
+              # Create a new release as requested
+              echo ":confused: Release ${release} not found, creating"
+          fi
+          if ! helm upgrade --install --atomic -f "${values_file}" --set image.tag="${tag}" -n "${namespace}" --timeout "${timeout}" --debug "${release}" --version "${chart_version}" "${chart}";
+          then
+              echo "--- :bk-status-failed: Failed to update ${release} of ${chart} with version ${chart_version}"
+              exit_code=1
+          fi
+          ;;
+  esac
 
   rm -f "${values_file}"
   exit $exit_code
