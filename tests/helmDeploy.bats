@@ -2,9 +2,6 @@
 
 load "$BATS_PLUGIN_PATH/load.bash"
 
-# Uncomment the following line to debug stub failures
-# export BUILDKITE_AGENT_STUB_DEBUG=/dev/tty
-
 setup() {
     export BUILDKITE_PLUGIN_K8S_DEPLOY_CHART="test-chart"
     export BUILDKITE_PLUGIN_K8S_DEPLOY_CHART_VERSION="0.1.14"
